@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  /* Warm off-white canvas — close to white but not stark. */
+  --background: #FAFAF7;
+  --foreground: #0A0A0A;
+
+  /* Electric cobalt — CTAs + accents. */
+  --brand-accent-rgb: 27 45 190;
+  --brand-accent: rgb(27 45 190);
+  --brand-accent-foreground: #FFFFFF;
+
+  /* Node status colors. */
+  --status-running-rgb: 27 45 190; /* cobalt */
+  --status-human-rgb: 217 119 6; /* amber */
+  --status-complete-rgb: 21 128 61; /* green */
+  --status-error-rgb: 190 18 60; /* red */
+
+  /* Dark surface. */
+  --brand-surface-dark: #0B0B12;
+  --brand-surface-dark-foreground: #F5F5F0;
+  --brand-surface-dark-muted: rgba(245, 245, 240, 0.65);
+  --brand-surface-dark-border: rgba(245, 245, 240, 0.08);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-accent-foreground: var(--brand-accent-foreground);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Quiet eyebrow — sans, sentence case, muted gray. */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgb(82 82 82);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* CTA shadow on the cobalt button. */
+.cta-shadow {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 2px 8px rgb(var(--brand-accent-rgb) / 0.18),
+    0 8px 24px -8px rgb(var(--brand-accent-rgb) / 0.28);
+}
+
+/* Pulsing accent for a running node. */
+@keyframes node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--status-running-rgb) / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(var(--status-running-rgb) / 0);
+  }
+}
+.node-running {
+  animation: node-pulse 1.6s ease-in-out infinite;
+}
+
+/* React Flow edge dash animation when data is flowing. */
+@keyframes edge-dash {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.edge-active path {
+  stroke: rgb(var(--brand-accent-rgb)) !important;
+  stroke-width: 2.5 !important;
+  stroke-dasharray: 6 6;
+  animation: edge-dash 0.6s linear infinite;
+}
