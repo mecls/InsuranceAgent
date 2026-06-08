@@ -29,10 +29,23 @@ cp .env.example .env.local   # then fill in the values
 
 ## 3. LLM
 
-- Set `ANTHROPIC_API_KEY`. Defaults: `ANTHROPIC_MODEL=claude-sonnet-4-6` for the
-  reasoning sections, `ANTHROPIC_EXTRACTION_MODEL=claude-haiku-4-5` for high-volume
-  extraction. PDFs are attached natively to Claude (no OCR engine needed).
-- Optional OpenAI-compatible fallback exists but does **not** support PDFs.
+Default: **OpenAI-compatible, DeepSeek via Ollama Cloud**.
+
+```
+LLM_PROVIDER=openai-compatible      # REQUIRED — without it run-tool routes to Anthropic
+LLM_BASE_URL=https://ollama.com/v1
+LLM_API_KEY=...
+LLM_MODEL=deepseek-v4-pro:cloud     # must support tool calling
+LLM_MAX_TOKENS=32000
+```
+
+- On this path the model has **no native PDF vision**, so the extraction agent
+  flattens the ACORD/supplemental PDFs to text (`lib/services/doc-parser.ts:pdfToText`)
+  before the LLM call. The loss-run `.xlsx` and cover letter are already text.
+- Ollama Cloud sometimes rejects a forced `tool_choice`; `run-tool` automatically
+  retries with `tool_choice: auto` + content-JSON parsing + a bounded repair loop.
+- To use Claude instead, set `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`
+  (`ANTHROPIC_MODEL`, `ANTHROPIC_EXTRACTION_MODEL`); PDFs are then attached natively.
 
 ## 4. Web research (optional)
 

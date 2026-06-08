@@ -23,7 +23,7 @@ agent to assemble the audit trail.
 | Phase | What it does | Real / Sim |
 |---|---|---|
 | **Intake** | Materializes the broker packet into real files, classifies attachments | real |
-| **Extraction** | ACORD/supplemental PDFs → Claude (native vision); loss-run `.xlsx` → SheetJS → text. Emits fields with confidence + source | real |
+| **Extraction** | ACORD/supplemental PDFs → text (or native Claude vision on the Anthropic path); loss-run `.xlsx` → SheetJS → text. Emits fields with confidence + source | real |
 | **Gap & Broker-Comms** | Validates vs. the GL required-fields checklist; drafts a clarification email. **Send is gated** (human approves) | real draft / gated send |
 | **Research & Enrichment** | Live web search (Tavily) + mock data feeds → sourced dossier + risk signals | web real / feeds sim |
 | **Appetite & Risk** | Deterministic GL appetite ruleset + guideline retrieval → decision/score/knockouts with cited rationale | real |
@@ -48,8 +48,10 @@ agent to assemble the audit trail.
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript strict, Tailwind v4
 - Supabase (Postgres + Storage) via the service-role client
 - Inngest v3 durable step functions
-- `@anthropic-ai/sdk` through `lib/llm/run-tool.ts` (forced-tool structured output,
-  native PDF attachment, ephemeral caching, OpenAI-compatible fallback)
+- LLM through `lib/llm/run-tool.ts` — **OpenAI-compatible (DeepSeek via Ollama
+  Cloud) by default**, or Anthropic. Forced-tool structured output, a bounded
+  repair loop for non-Claude models, native PDF attachment on the Anthropic path
+  (PDFs flattened to text otherwise)
 - `@xyflow/react` (React Flow) for the node graph
 - `postal-mime` (.eml) + `xlsx` / SheetJS (loss runs)
 

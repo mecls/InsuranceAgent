@@ -95,6 +95,50 @@ export function bytesToText(bytes: ArrayBuffer | Uint8Array): string {
   return new TextDecoder().decode(data)
 }
 
+/**
+ * Extract visible text from a PDF's content streams. Used on the OpenAI-compatible
+ * provider path, where the model has no native PDF vision — so PDFs must be
+ * flattened to text first (the Anthropic path attaches them natively instead).
+ *
+ * Handles uncompressed text-showing operators (`(...) Tj`, `[...] TJ`), which is
+ * what the demo's generated ACORD / supplemental PDFs use. Returns '' if no text
+ * is recoverable (e.g. a compressed real-world PDF would need a full PDF library).
+ */
+export function pdfToText(bytes: ArrayBuffer | Uint8Array): string {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  const raw = new TextDecoder('latin1').decode(data)
+
+  const unescape = (s: string) =>
+    s.replace(/\\([()\\])/g, '$1').replace(/\\n/g, '\n').replace(/\\r/g, '')
+
+  const lines: string[] = []
+  // Each content stream between `stream` and `endstream`.
+  const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g
+  let sm: RegExpExecArray | null
+  while ((sm = streamRe.exec(raw))) {
+    const body = sm[1]
+    // `(string) Tj`
+    const tjRe = /\(((?:\\.|[^\\()])*)\)\s*Tj/g
+    let m: RegExpExecArray | null
+    while ((m = tjRe.exec(body))) lines.push(unescape(m[1]))
+    // `[(a)(b)] TJ` — concatenate the inner string fragments.
+    const tjArrRe = /\[((?:[^\]]|\\\])*)\]\s*TJ/g
+    while ((m = tjArrRe.exec(body))) {
+      const frags = [...m[1].matchAll(/\(((?:\\.|[^\\()])*)\)/g)].map((x) =>
+        unescape(x[1]),
+      )
+      if (frags.length) lines.push(frags.join(''))
+    }
+  }
+  return lines.join('\n').trim()
+}
+
+/** Whether the configured LLM provider can ingest PDFs natively (Anthropic only). */
+export function providerSupportsNativePdf(): boolean {
+  const p = (process.env.LLM_PROVIDER ?? 'anthropic').toLowerCase()
+  return p !== 'openai-compatible' && p !== 'openai'
+}
+
 export function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
   let binary = ''

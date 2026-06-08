@@ -10,6 +10,8 @@ import {
 import {
   bytesToBase64,
   bytesToText,
+  pdfToText,
+  providerSupportsNativePdf,
   xlsxToText,
 } from '@/lib/services/doc-parser'
 import { formatCurrency } from '@/lib/format'
@@ -41,6 +43,9 @@ export async function runExtraction(
 ): Promise<CaseFile> {
   await events.entered(runId, 'extraction', 'Opening submission documents')
 
+  // Anthropic ingests PDFs natively (vision). OpenAI-compatible models (DeepSeek
+  // via Ollama, etc.) cannot, so PDFs are flattened to text first.
+  const nativePdf = providerSupportsNativePdf()
   const pdfs: PdfAttachment[] = []
   const textBlocks: string[] = []
 
@@ -48,7 +53,15 @@ export async function runExtraction(
     await events.activity(runId, 'extraction', `Reading ${att.filename}`, 0.3)
     const bytes = new Uint8Array(await downloadAttachment(att.storagePath))
     if (att.mime === 'application/pdf') {
-      pdfs.push({ base64: bytesToBase64(bytes), label: att.filename })
+      if (nativePdf) {
+        pdfs.push({ base64: bytesToBase64(bytes), label: att.filename })
+      } else {
+        const text = pdfToText(bytes)
+        textBlocks.push(
+          `## ${att.filename}\n${text || '[no extractable text in PDF]'}`,
+        )
+        await events.activity(runId, 'extraction', `Parsing ${att.filename}`, 0.4)
+      }
     } else if (att.kind === 'loss_run') {
       const csv = xlsxToText(bytes)
       textBlocks.push(`## ${att.filename} (loss run)\n${csv}`)
@@ -60,12 +73,15 @@ export async function runExtraction(
 
   await events.toolStarted(runId, 'extraction', 'emit_extraction')
 
-  const userPrompt = `The broker submission documents are attached as PDFs and/or quoted below.
+  const docsNote = nativePdf
+    ? 'Some documents are attached as PDFs; others are quoted below.'
+    : 'All documents are quoted below as text (extracted from the PDFs / workbook).'
+  const userPrompt = `${docsNote}
 
 ${textBlocks.join('\n\n')}
 
 # Your task
-Read all documents (attached PDFs + the text above) and call the \`emit_extraction\` tool exactly once with the structured Case File.`
+Read every document and call the \`emit_extraction\` tool exactly once with the structured Case File.`
 
   const result = await runTool({
     systemBlocks: [sharedSystemBlock(), { type: 'text', text: EXTRACTION_SYSTEM }],
