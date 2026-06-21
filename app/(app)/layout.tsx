@@ -1,6 +1,8 @@
 import Link from 'next/link'
-import { ShieldCheck } from 'lucide-react'
 import { SITE_CONFIG } from '@/lib/site-config'
+import { AccountMenu } from '@/components/dashboard/account-menu'
+
+const AVATAR_INITIAL = 'M'
 
 export default function AppLayout({
   children,
@@ -8,19 +10,25 @@ export default function AppLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex h-[100dvh] min-h-0 flex-col">
-      <nav className="flex items-center gap-2 border-b border-black/10 bg-white px-5 py-2.5">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-lg bg-[var(--brand-accent)] text-white">
-            <ShieldCheck className="size-4" />
+    <div className="flex h-[100dvh] min-h-0 flex-col bg-[var(--color-bg-page)]">
+      <nav
+        className="flex h-[52px] shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-white px-5"
+      >
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="text-[15px] font-semibold text-[#0F1923]"
+          >
+            {SITE_CONFIG.brand}
+          </Link>
+          <span className="h-4 w-px bg-[var(--color-border)]" />
+          <span className="text-[13px] text-[var(--color-text-muted)]">
+            {SITE_CONFIG.lineOfBusinessLabel}
           </span>
-          <span className="text-sm font-semibold">{SITE_CONFIG.brand}</span>
-        </Link>
-        <span className="ml-1 hidden text-xs text-neutral-400 sm:inline">
-          {SITE_CONFIG.lineOfBusinessLabel} underwriting
-        </span>
+        </div>
+        <AccountMenu initial={AVATAR_INITIAL} />
       </nav>
-      <main className="min-h-0 flex-1">{children}</main>
+      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
     </div>
   )
 }

@@ -6,7 +6,8 @@ human underwriter in the loop — fronted by a **real-time node-graph dashboard*
 that shows every phase as it streams.
 
 > Sibling product to `EmailAgent` / `miraside`. Same stack: **Next.js 16 + TypeScript
-> + Supabase + Inngest + Anthropic + SSE**, deployable on Vercel. Single-tenant
+> + Supabase + Inngest + open-source LLMs (DeepSeek + an open VLM via Ollama) +
+> SSE**, deployable on Vercel. Single-tenant
 > demo, no auth, zero real PII.
 
 ## The pipeline
@@ -23,7 +24,7 @@ agent to assemble the audit trail.
 | Phase | What it does | Real / Sim |
 |---|---|---|
 | **Intake** | Materializes the broker packet into real files, classifies attachments | real |
-| **Extraction** | ACORD/supplemental PDFs → text (or native Claude vision on the Anthropic path); loss-run `.xlsx` → SheetJS → text. Emits fields with confidence + source | real |
+| **Extraction** | ACORD/supplemental PDFs → page images for an open VLM (or text-flattened when no vision model is set); loss-run `.xlsx` → SheetJS → text. Emits fields with confidence + source | real |
 | **Gap & Broker-Comms** | Validates vs. the GL required-fields checklist; drafts a clarification email. **Send is gated** (human approves) | real draft / gated send |
 | **Research & Enrichment** | Live web search (Tavily) + mock data feeds → sourced dossier + risk signals | web real / feeds sim |
 | **Appetite & Risk** | Deterministic GL appetite ruleset + guideline retrieval → decision/score/knockouts with cited rationale | real |
@@ -48,12 +49,13 @@ agent to assemble the audit trail.
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript strict, Tailwind v4
 - Supabase (Postgres + Storage) via the service-role client
 - Inngest v3 durable step functions
-- LLM through `lib/llm/run-tool.ts` — **OpenAI-compatible (DeepSeek via Ollama
-  Cloud) by default**, or Anthropic. Forced-tool structured output, a bounded
-  repair loop for non-Claude models, native PDF attachment on the Anthropic path
-  (PDFs flattened to text otherwise)
+- LLM through `lib/llm/run-tool.ts` — a fully **open-source** stack on an
+  OpenAI-compatible endpoint (Ollama Cloud): **DeepSeek** for text/reasoning, an
+  open **VLM** (e.g. Qwen2.5-VL) for reading PDFs. Forced-tool structured output
+  with a bounded repair loop. PDFs are read by rasterizing each page to an image
+  (`LLM_VISION_MODEL`), or flattened to text when no vision model is set
 - `@xyflow/react` (React Flow) for the node graph
-- `postal-mime` (.eml) + `xlsx` / SheetJS (loss runs)
+- `postal-mime` (.eml) + `xlsx` / SheetJS (loss runs) + `pdf-to-img` (PDF → page images)
 
 ## Commands
 

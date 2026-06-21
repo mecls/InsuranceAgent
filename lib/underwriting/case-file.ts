@@ -106,11 +106,24 @@ export interface CaseFile {
     }
     exposures?: { basis: string; amount: number; classCode?: string | null }[]
     lossHistory?: LossRunYear[]
+    /** Where this submission came from, when ingested from an external source. */
+    source?: { type: 'gmail'; threadId: string; permalink?: string }
   }
 
   attachments: AttachmentManifestItem[]
   fields: ExtractedField[]
   gaps: Gap[]
+
+  /**
+   * Authoritative documents (ACORD, supplemental, SOV) that were supplied but
+   * yielded no readable content — i.e. extraction ran blind on them. This is a
+   * DIFFERENT, more serious finding than a missing field: it means the data may
+   * be present in the file but the agent could not read it. Drives a compliance
+   * flag and is shown to the underwriter so missing fields aren't mistaken for
+   * "not in the submission". Usually means a vision model is needed (see
+   * LLM_VISION_MODEL) for scanned/compressed PDFs.
+   */
+  unreadableDocuments?: string[]
 
   brokerEmailDraft?: { subject: string; body: string }
 
@@ -135,6 +148,14 @@ export interface CaseFile {
     ratingBreakdown: RatingLineItem[]
     preBindChecklist: { item: string; done: boolean }[]
     simulated: true
+    /**
+     * False when the premium rests on assumed inputs (missing exposure, or an
+     * unread document) — a placeholder, not a firm indication. The UI surfaces
+     * this so a fictional premium is never shown as reliable.
+     */
+    reliable?: boolean
+    /** Why the premium may be unreliable (missing inputs, unread docs). */
+    assumptions?: string[]
   }
   /** Set to true when out of appetite — declined, no quote. */
   declined?: boolean

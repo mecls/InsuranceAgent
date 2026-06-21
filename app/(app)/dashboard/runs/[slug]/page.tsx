@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { getRunBySlug } from '@/lib/db/runs'
-import { RunDashboard } from '@/components/run/run-dashboard'
+import { RunDetail } from '@/components/run/run-detail'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,10 +14,11 @@ export default async function RunPage({
   if (!run) notFound()
 
   return (
-    <RunDashboard
+    <RunDetail
       runId={run.id}
       slug={run.slug}
       submissionLabel={run.submission_label}
+      insuredName={run.case_file?.submission?.insured?.name ?? null}
     />
   )
 }

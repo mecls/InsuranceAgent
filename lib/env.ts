@@ -28,6 +28,12 @@ export const env = {
   supabaseUrl: () => required('SUPABASE_URL'),
   supabaseServiceRoleKey: () => required('SUPABASE_SERVICE_ROLE_KEY'),
 
+  // Google OAuth (read-only Gmail ingestion). Client id/secret are required for
+  // the Connect Gmail flow; the refresh token is minted by consent and stored in
+  // Supabase (not env). See lib/services/gmail.ts.
+  googleOAuthClientId: () => required('GOOGLE_OAUTH_CLIENT_ID'),
+  googleOAuthClientSecret: () => required('GOOGLE_OAUTH_CLIENT_SECRET'),
+
   // Web research provider (Tavily). Optional — Research agent degrades to a
   // documented "no web access configured" note if absent.
   tavilyApiKey: () => process.env.TAVILY_API_KEY ?? '',

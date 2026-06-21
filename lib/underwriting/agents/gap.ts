@@ -15,7 +15,8 @@ The submission is missing required fields. Draft a short, professional email to 
 ## Rules
 - List only the missing items provided to you, phrased as a clear numbered request.
 - Be concise and courteous. Sign as "Underwriting Desk".
-- Do not invent context or promise terms.`
+- Do not invent context or promise terms.
+- If a note says some attached documents could not be processed on our end, OPEN by acknowledging that we are re-reviewing the attached forms, and frame the request as "to the extent not already shown in the attached documents." Never imply the broker failed to provide information that may already be in the file.`
 
 /**
  * Gap & Broker-Comms Agent. Validates completeness against the GL required-fields
@@ -50,14 +51,31 @@ export async function runGap(
     return caseFile
   }
 
+  // If we failed to read a document, the "missing" fields may actually be in the
+  // file. Warn the underwriter and soften the email so we don't ask the broker to
+  // resend data that's already on the unreadable form.
+  const unreadable = caseFile.unreadableDocuments ?? []
+  if (unreadable.length > 0) {
+    await events.activity(
+      runId,
+      'gap',
+      `⚠ ${unreadable.length} document(s) unread (${unreadable.join(', ')}) — some "missing" fields may already be in the file`,
+      0.6,
+    )
+  }
+
   // Draft the clarification email (real), but do not send (gated).
   await events.toolStarted(runId, 'gap', 'emit_broker_email')
   const broker = caseFile.submission.broker
+  const unreadableNote =
+    unreadable.length > 0
+      ? `\nNote (internal): these attached documents could not be processed on our end and are being re-reviewed: ${unreadable.join(', ')}. Soften the request accordingly.`
+      : ''
   const userPrompt = `Broker: ${broker?.name ?? 'broker'} <${broker?.email ?? 'unknown'}>
 Insured: ${caseFile.submission.insured?.name ?? 'the applicant'}
 
 Missing required items:
-${required.map((g, i) => `${i + 1}. ${g.note} (${g.field})`).join('\n')}
+${required.map((g, i) => `${i + 1}. ${g.note} (${g.field})`).join('\n')}${unreadableNote}
 
 # Your task
 Draft the clarification email. Call \`emit_broker_email\` exactly once.`

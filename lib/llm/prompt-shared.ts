@@ -1,4 +1,4 @@
-import type { CachedTextBlock } from './run-tool'
+import type { SystemTextBlock } from './run-tool'
 
 /**
  * Shared system scaffolding for every underwriting LLM call. Applies the
@@ -30,10 +30,9 @@ You do not send email, bind coverage, or take any external action. You draft and
 
 # English only`
 
-export function sharedSystemBlock(): CachedTextBlock {
+export function sharedSystemBlock(): SystemTextBlock {
   return {
     type: 'text',
     text: SHARED_SYSTEM_TEXT,
-    cache_control: { type: 'ephemeral' },
   }
 }

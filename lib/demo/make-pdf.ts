@@ -1,7 +1,8 @@
 /**
  * Minimal single-page PDF writer. Produces a genuine (text-bearing) PDF so the
- * synthetic ACORD / supplemental documents exercise Claude's native PDF path in
- * run-tool — no third-party PDF dependency. Helvetica, US Letter, top-down lines.
+ * synthetic ACORD / supplemental documents exercise the real PDF path in
+ * extraction (text flatten, or rasterized to images for the vision model) — no
+ * third-party PDF dependency. Helvetica, US Letter, top-down lines.
  *
  * Not a general PDF library: it handles ASCII text lines, which is all the demo
  * forms need. Long lines are wrapped; overflow beyond one page is truncated.

@@ -1,95 +1,62 @@
-import Link from 'next/link'
-import { ArrowRight, Play } from 'lucide-react'
 import { listRuns } from '@/lib/db/runs'
-import { startDemoRun } from '@/app/actions/runs'
-import { cn } from '@/lib/utils'
+import { NewSubmission } from '@/components/dashboard/new-submission'
+import { GmailToast } from '@/components/dashboard/gmail-toast'
+import { StatsBar } from '@/components/dashboard/stats-bar'
+import { SubmissionsTabs, type RunSummary } from '@/components/dashboard/submissions-tabs'
 
 export const dynamic = 'force-dynamic'
 
-const SCENARIOS = [
-  { id: 'clean', label: 'Clean submission', hint: 'Auto-quote path' },
-  { id: 'referral', label: 'Referral', hint: 'Knockout → underwriter' },
-  { id: 'gappy', label: 'Missing fields', hint: 'Triggers broker email' },
-]
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-const STATUS_STYLE: Record<string, string> = {
-  pending: 'bg-neutral-100 text-neutral-600',
-  running: 'bg-[rgb(27_45_190/0.08)] text-[var(--brand-accent)]',
-  awaiting_human: 'bg-amber-100 text-amber-700',
-  ready: 'bg-green-100 text-green-700',
-  failed: 'bg-rose-100 text-rose-700',
+/** Request-time KPI rollup. Kept out of the component so the time read is fine. */
+function buildStats(summaries: RunSummary[]) {
+  const now = Date.now()
+  return {
+    thisWeek: summaries.filter((s) => now - new Date(s.createdAt).getTime() < WEEK_MS).length,
+    quoteReady: summaries.filter((s) => s.status === 'ready' && !s.bound).length,
+    inProgress: summaries.filter((s) => s.status === 'running' || s.status === 'awaiting_human').length,
+    bound: summaries.filter((s) => s.bound).length,
+  }
 }
 
 export default async function DashboardPage() {
-  const runs = await listRuns()
+  const runs = await listRuns(100)
+
+  const summaries: RunSummary[] = runs.map((r) => ({
+    id: r.id,
+    slug: r.slug,
+    label: r.submission_label,
+    insuredName: r.case_file?.submission?.insured?.name ?? null,
+    brokerName: r.case_file?.submission?.broker?.name ?? null,
+    status: r.status,
+    bound: r.bound_policy != null,
+    policyNumber: r.bound_policy?.policyNumber ?? null,
+    createdAt: r.created_at,
+    readyAt: r.ready_at,
+  }))
+
+  const stats = buildStats(summaries)
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-8">
-      <div className="eyebrow">Underwriting submissions</div>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-        Start a run
-      </h1>
-      <p className="mt-1 text-sm text-neutral-500">
-        Pick a synthetic broker submission. A crew of agents takes it from email
-        to quote-ready, live on the node graph.
-      </p>
+    <div className="h-full overflow-y-auto">
+      <GmailToast />
+      <div className="mx-auto max-w-[900px] px-5 py-8">
+      {/* Section 1 — New submission */}
+      <section>
+        <div className="eyebrow mb-2">New Submission</div>
+        <NewSubmission />
+      </section>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        {SCENARIOS.map((s) => (
-          <form key={s.id} action={startDemoRun}>
-            <input type="hidden" name="scenario" value={s.id} />
-            <button
-              type="submit"
-              className="group flex w-full flex-col items-start gap-1 rounded-xl border border-black/10 bg-white p-4 text-left transition-colors hover:border-[var(--brand-accent)]"
-            >
-              <span className="grid size-8 place-items-center rounded-lg bg-[var(--brand-accent)] text-white cta-shadow">
-                <Play className="size-4" />
-              </span>
-              <span className="mt-1 text-sm font-semibold">{s.label}</span>
-              <span className="text-xs text-neutral-500">{s.hint}</span>
-            </button>
-          </form>
-        ))}
+      {/* Section 2 — Summary stats */}
+      <section className="mt-8">
+        <StatsBar {...stats} />
+      </section>
+
+      {/* Section 3 — Submissions & runs */}
+      <section className="mt-8">
+        <SubmissionsTabs runs={summaries} />
+      </section>
       </div>
-
-      <h2 className="mt-10 text-sm font-semibold text-neutral-700">
-        Recent runs
-      </h2>
-      <ul className="mt-3 divide-y divide-black/5 overflow-hidden rounded-xl border border-black/10 bg-white">
-        {runs.length === 0 && (
-          <li className="px-4 py-6 text-sm text-neutral-400">
-            No runs yet. Start one above.
-          </li>
-        )}
-        {runs.map((r) => (
-          <li key={r.id}>
-            <Link
-              href={`/dashboard/runs/${r.slug}`}
-              className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-neutral-50"
-            >
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">
-                  {r.submission_label}
-                </div>
-                <div className="text-xs text-neutral-400 tabular">
-                  {new Date(r.created_at).toLocaleString()}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'rounded-full px-2 py-0.5 text-xs font-medium',
-                    STATUS_STYLE[r.status] ?? STATUS_STYLE.pending,
-                  )}
-                >
-                  {r.status}
-                </span>
-                <ArrowRight className="size-4 text-neutral-300" />
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }

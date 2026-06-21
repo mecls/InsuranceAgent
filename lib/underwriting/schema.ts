@@ -1,8 +1,8 @@
 import { z } from 'zod'
 
 /**
- * Extraction output schema (Zod for code validation + JSON Schema for the
- * Anthropic tool input). Both describe the same shape — keep them in sync. The
+ * Extraction output schema (Zod for code validation + JSON Schema for the LLM
+ * tool/function input). Both describe the same shape — keep them in sync. The
  * extraction agent reads the submission documents and emits this; the orchestrator
  * folds it into the Case File.
  *
@@ -58,7 +58,7 @@ export const ExtractionResultSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>
 
-// ── JSON Schema (Anthropic tool input) ──────────────────────────────────────
+// ── JSON Schema (LLM tool/function input) ───────────────────────────────────
 
 const SOURCE_JSON = {
   type: 'object',
@@ -302,6 +302,67 @@ export const COMPLIANCE_TOOL_INPUT_SCHEMA = {
     summary: {
       type: 'string',
       description: 'A short audit-trail summary: that every field traces to a source and every decision to a rationale.',
+    },
+  },
+} as const
+
+// ── Attachment classification (Intake agent, real-upload path) ───────────────
+// On a real broker upload the files arrive arbitrarily named. The intake agent
+// reads each file's name + a text preview and labels its document kind. The
+// kinds mirror AttachmentManifestItem['kind'] in case-file.ts.
+
+const ATTACHMENT_KINDS = [
+  'acord_125',
+  'acord_126',
+  'gl_supplemental',
+  'loss_run',
+  'sov',
+  'cover_letter',
+  'unknown',
+] as const
+
+export const AttachmentClassificationSchema = z.object({
+  classifications: z.array(
+    z.object({
+      filename: z.string(),
+      kind: z.enum(ATTACHMENT_KINDS),
+      rationale: z.string().nullable().optional(),
+    }),
+  ),
+})
+export type AttachmentClassification = z.infer<
+  typeof AttachmentClassificationSchema
+>
+
+export const CLASSIFY_TOOL_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['classifications'],
+  properties: {
+    classifications: {
+      type: 'array',
+      description: 'One entry per input file, in any order.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['filename', 'kind'],
+        properties: {
+          filename: {
+            type: 'string',
+            description: 'The exact filename as given in the input.',
+          },
+          kind: {
+            type: 'string',
+            enum: [...ATTACHMENT_KINDS],
+            description:
+              'acord_125 = ACORD commercial application; acord_126 = GL section; gl_supplemental = GL supplemental/questionnaire; loss_run = prior claims/loss history; sov = statement of values; cover_letter = broker email/narrative; unknown = none of these.',
+          },
+          rationale: {
+            type: ['string', 'null'],
+            description: 'One short phrase on why, citing a cue from the file.',
+          },
+        },
+      },
     },
   },
 } as const

@@ -13,9 +13,15 @@ const RESEARCH_SYSTEM = `# This call: RESEARCH & ENRICHMENT
 
 You enrich a General Liability submission with external intelligence and produce a SOURCED risk narrative for the underwriter.
 
+## THE APPLICATION IS AUTHORITATIVE (most important rule)
+- The submission/application figures given to you under "Application facts" are GROUND TRUTH. Never contradict them.
+- For any figure the application already provides (revenue, payroll, headcount, years in business, address, NAICS), use the APPLICATION's number. Do NOT substitute, "correct", or restate it with a data-feed estimate.
+- Third-party data-feed values are UNVERIFIED ESTIMATES. Only use a feed number for something the application does NOT state, and when you do, explicitly label it "unverified third-party estimate".
+- If a feed value conflicts with the application, the application wins. Either omit the feed value or flag the discrepancy as a data-quality note; never present the feed number as the firm's actual figure.
+
 ## Hard rules
-- Every claim in the dossier and every signal must be supported by one of the provided sources (web results or the labelled data-feed snippets). Cite it.
-- If web results are sparse or unavailable, say so plainly and lean on the data-feed snippets and the submission. Do not invent facts, news, or litigation.
+- Every claim in the dossier and every signal must be supported by one of the provided sources (web results, the labelled data-feed snippets, or the application facts). Cite it.
+- If web results are sparse or unavailable, say so plainly and lean on the application facts. Do not invent facts, news, or litigation.
 - Surface both positive and negative signals. Be specific (years, amounts, class hazards), not generic.
 
 ## Output
@@ -63,32 +69,72 @@ export async function runResearch(
     }
   }
 
-  // 2. Mock paid data feeds (clearly labelled as simulated).
+  // 2. Mock paid data feeds (clearly labelled as simulated). Reconcile the
+  // firmographic feed against the application: the application is authoritative,
+  // so drop any feed figure the application already provides. This prevents the
+  // feed's invented numbers from being surfaced as findings that contradict the
+  // source document (a dangerous failure mode).
   await events.toolStarted(runId, 'research', 'data_feeds')
   const firmo = getFirmographics(name)
   const trend = getIndustryLossTrend(insured?.naics)
+
+  const appHasRevenue = (caseFile.submission.exposures ?? []).some((e) =>
+    /sales|revenue|receipts/i.test(e.basis),
+  )
+  const appHasYears = insured?.yearsInBusiness != null
+  const feedEstimates: Record<string, unknown> = {
+    estimatedEmployees: firmo.estimatedEmployees, // application doesn't capture headcount
+    source: firmo.source,
+    note: 'unverified third-party estimate; application figures govern',
+  }
+  if (!appHasRevenue) feedEstimates.estimatedRevenueUsd = firmo.estimatedRevenueUsd
+  if (!appHasYears) feedEstimates.yearsInBusiness = firmo.yearsInBusiness
+
   await events.activity(
     runId,
     'research',
-    `Data feed: ~${firmo.estimatedEmployees} employees, ${trend.trendDirection} loss trend`,
+    `Data feed (unverified estimate): ~${firmo.estimatedEmployees} employees; ${trend.trendDirection} industry loss trend`,
     0.7,
   )
   await events.toolCompleted(runId, 'research', 'data_feeds', 'firmographics + loss trend (sim)')
 
-  // 3. Synthesize a sourced dossier.
+  // 3. Synthesize a sourced dossier. Application facts are passed as ground truth.
   await events.toolStarted(runId, 'research', 'emit_research')
   const sourceText = collected
     .map((r, i) => `[web ${i + 1}] ${r.title}\n${r.url}\n${r.content}`)
     .join('\n\n')
+  const exposuresText = (caseFile.submission.exposures ?? [])
+    .map((e) => `${e.basis}: $${e.amount.toLocaleString()}`)
+    .join('; ')
+  const loss = caseFile.submission.lossHistory ?? []
+  const applicationFacts = {
+    insuredName: insured?.name ?? null,
+    naics: insured?.naics ?? null,
+    address: insured?.address ?? null,
+    yearsInBusiness: insured?.yearsInBusiness ?? null,
+    exposures: exposuresText || null,
+    lossSummary: loss.length
+      ? `${loss.reduce((s, y) => s + y.claims, 0)} claims / $${loss
+          .reduce((s, y) => s + y.incurred, 0)
+          .toLocaleString()} incurred over ${loss.length} year(s)`
+      : null,
+    unreadableDocuments: caseFile.unreadableDocuments ?? [],
+  }
   const userPrompt = `Applicant: ${name}
-NAICS: ${insured?.naics ?? 'unknown'} | Address: ${insured?.address ?? 'unknown'}
-Operations / class context from the submission is already known to the workflow.
+
+## Application facts (AUTHORITATIVE — never contradict; use these figures verbatim)
+${JSON.stringify(applicationFacts, null, 2)}
+${
+  applicationFacts.unreadableDocuments.length
+    ? `\nNote: some application documents could not be read (${applicationFacts.unreadableDocuments.join(', ')}). Do NOT fill the resulting gaps with data-feed estimates presented as fact; treat them as unknown.`
+    : ''
+}
 
 ## Web search results ${degraded ? '(NONE — no web provider configured)' : ''}
 ${sourceText || '(no web results)'}
 
-## Data-feed snippets (SIMULATED — label as such)
-[feed firmographics] ${JSON.stringify(firmo)}
+## Data-feed snippets (SIMULATED, UNVERIFIED — use only for fields the application lacks, and label as estimates)
+[feed firmographics] ${JSON.stringify(feedEstimates)}
 [feed loss-trend] ${JSON.stringify(trend)}
 
 # Your task

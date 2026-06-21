@@ -19,16 +19,38 @@ export interface RatingResult {
   premium: number
   currency: string
   breakdown: RatingLineItem[]
+  /**
+   * True only when the engine had the inputs a real rate needs (a stated rating
+   * exposure). False means the premium is a placeholder built on an assumed
+   * exposure and must NOT be presented as a firm indication.
+   */
+  ratable: boolean
+  /** Assumptions the engine had to make because inputs were missing. */
+  assumptions: string[]
 }
+
+const PLACEHOLDER_EXPOSURE = 1_000_000
 
 export function rate(caseFile: CaseFile): RatingResult {
   const naics = caseFile.submission.insured?.naics ?? ''
   const baseRate = HAZARD_TIER[naics] ?? DEFAULT_RATE
+  const assumptions: string[] = []
 
-  // Exposure basis: sum of stated exposures, else a sales/payroll proxy.
+  // Exposure basis: sum of stated exposures. With none on file we CANNOT produce
+  // a real rate — fall back to a labelled placeholder and mark the result as not
+  // ratable, rather than emitting a confident but fictional premium.
   const exposures = caseFile.submission.exposures ?? []
-  const exposureAmount =
-    exposures.reduce((s, e) => s + (e.amount || 0), 0) || 1_000_000
+  const statedExposure = exposures.reduce((s, e) => s + (e.amount || 0), 0)
+  const hasExposure = statedExposure > 0
+  const exposureAmount = hasExposure ? statedExposure : PLACEHOLDER_EXPOSURE
+  if (!hasExposure) {
+    assumptions.push(
+      `No rating exposure (sales or payroll) on file; base premium uses a $${PLACEHOLDER_EXPOSURE.toLocaleString()} placeholder and is NOT a real rate.`,
+    )
+  }
+  if (!naics) {
+    assumptions.push(`No NAICS on file; using the default GL rate $${DEFAULT_RATE.toFixed(2)} / $1K.`)
+  }
 
   const breakdown: RatingLineItem[] = []
 
@@ -69,7 +91,13 @@ export function rate(caseFile: CaseFile): RatingResult {
   breakdown.push({ label: 'Policy fee', kind: 'fee', value: fee })
   premium += fee
 
-  return { premium: round(premium), currency: 'USD', breakdown }
+  return {
+    premium: round(premium),
+    currency: 'USD',
+    breakdown,
+    ratable: hasExposure,
+    assumptions,
+  }
 }
 
 function round(n: number): number {

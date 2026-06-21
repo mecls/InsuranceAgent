@@ -40,21 +40,38 @@ export async function runPricing(
 
   await events.activity(runId, 'pricing', 'Base premium computed (rating engine — simulated)', 0.4)
   const result = rate(caseFile)
+
+  // The premium is only reliable if the engine had real inputs AND no authoritative
+  // document went unread. Otherwise it's a placeholder, not a firm indication.
+  const unreadable = caseFile.unreadableDocuments ?? []
+  const assumptions = [
+    ...result.assumptions,
+    ...(unreadable.length
+      ? [`${unreadable.length} document(s) could not be read (${unreadable.join(', ')}); inputs may be incomplete.`]
+      : []),
+  ]
+  const reliable = result.ratable && unreadable.length === 0
+
   await events.activity(
     runId,
     'pricing',
-    `Applying experience and risk-control modifiers → ${formatCurrency(result.premium)}`,
+    reliable
+      ? `Applying experience and risk-control modifiers → ${formatCurrency(result.premium)}`
+      : `⚠ Insufficient data to rate — ${formatCurrency(result.premium)} is a PLACEHOLDER, not a firm indication`,
     0.7,
   )
 
   await events.toolStarted(runId, 'pricing', 'emit_quote_assembly')
-  const userPrompt = `Indicative premium (SIMULATED rating engine): ${formatCurrency(result.premium, result.currency)}
+  const reliabilityNote = reliable
+    ? ''
+    : `\n\nIMPORTANT — THIS PREMIUM IS NOT RELIABLE. It rests on assumed inputs:\n${assumptions.map((a) => `- ${a}`).join('\n')}\nIn the summary, state clearly that this is a non-binding placeholder pending the missing information; do NOT present it as a firm indication.`
+  const userPrompt = `Indicative premium (SIMULATED rating engine): ${formatCurrency(result.premium, result.currency)}${reliable ? '' : ' [PLACEHOLDER — insufficient data]'}
 Appetite decision: ${caseFile.appetite?.decision?.toUpperCase() ?? 'IN'}
 
 Rating breakdown:
 ${result.breakdown.map((b) => `- ${b.label}: ${b.kind === 'modifier' ? `×${b.value}` : formatCurrency(b.value)}${b.detail ? ` (${b.detail})` : ''}`).join('\n')}
 
-Insured: ${caseFile.submission.insured?.name ?? 'applicant'} | Limits: ${formatCurrency(caseFile.submission.coverage?.occurrenceLimit ?? 0)} occ / ${formatCurrency(caseFile.submission.coverage?.aggregateLimit ?? 0)} agg
+Insured: ${caseFile.submission.insured?.name ?? 'applicant'} | Limits: ${formatCurrency(caseFile.submission.coverage?.occurrenceLimit ?? 0)} occ / ${formatCurrency(caseFile.submission.coverage?.aggregateLimit ?? 0)} agg${reliabilityNote}
 
 # Your task
 Assemble the quote. Call \`emit_quote_assembly\` exactly once.`
@@ -77,6 +94,8 @@ Assemble the quote. Call \`emit_quote_assembly\` exactly once.`
     ratingBreakdown: result.breakdown,
     preBindChecklist: assembly.preBindChecklist.map((item) => ({ item, done: false })),
     simulated: true,
+    reliable,
+    assumptions,
   }
   caseFile.status = 'pricing'
 
@@ -85,12 +104,16 @@ Assemble the quote. Call \`emit_quote_assembly\` exactly once.`
     breakdown: result.breakdown,
     summary: assembly.summary,
     preBindChecklist: assembly.preBindChecklist,
+    reliable,
+    assumptions,
   })
   await events.completed(
     runId,
     'pricing',
-    `${formatCurrency(result.premium)} indicative`,
-    `${formatCurrency(result.premium)} (sim)`,
+    reliable
+      ? `${formatCurrency(result.premium)} indicative`
+      : `${formatCurrency(result.premium)} placeholder — insufficient data`,
+    reliable ? `${formatCurrency(result.premium)} (sim)` : 'INSUFFICIENT DATA',
   )
 
   return caseFile

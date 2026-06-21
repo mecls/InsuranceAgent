@@ -5,10 +5,10 @@ import type { AttachmentManifestItem } from '@/lib/underwriting/case-file'
 /**
  * DocParser — real ingestion adapters behind a clean interface.
  *  - `.eml`  → headers + body + attachments (postal-mime)
- *  - `.xlsx` → CSV text the LLM can read (SheetJS) — Claude can't ingest xlsx
- *              natively, so loss-run workbooks are flattened to text first
- *  - PDFs    → passed through as base64 and attached natively to Claude (vision);
- *              no separate OCR engine needed
+ *  - `.xlsx` → CSV text the LLM can read (SheetJS); loss-run workbooks are
+ *              flattened to text first (no model ingests xlsx natively)
+ *  - PDFs    → rasterized to page images for an open vision model (pdfToImages),
+ *              or flattened to text (pdfToText) when no vision model is set
  *
  * Production swaps these for carrier-tuned parsers; the interface stays put.
  */
@@ -96,13 +96,13 @@ export function bytesToText(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 /**
- * Extract visible text from a PDF's content streams. Used on the OpenAI-compatible
- * provider path, where the model has no native PDF vision — so PDFs must be
- * flattened to text first (the Anthropic path attaches them natively instead).
+ * Extract visible text from a PDF's content streams. Used in text-only mode (no
+ * LLM_VISION_MODEL configured), where PDFs must be flattened to text before the
+ * model sees them. When a vision model is set, PDFs go through pdfToImages instead.
  *
  * Handles uncompressed text-showing operators (`(...) Tj`, `[...] TJ`), which is
  * what the demo's generated ACORD / supplemental PDFs use. Returns '' if no text
- * is recoverable (e.g. a compressed real-world PDF would need a full PDF library).
+ * is recoverable (e.g. a compressed/scanned real-world PDF — use the vision path).
  */
 export function pdfToText(bytes: ArrayBuffer | Uint8Array): string {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
@@ -133,10 +133,40 @@ export function pdfToText(bytes: ArrayBuffer | Uint8Array): string {
   return lines.join('\n').trim()
 }
 
-/** Whether the configured LLM provider can ingest PDFs natively (Anthropic only). */
-export function providerSupportsNativePdf(): boolean {
-  const p = (process.env.LLM_PROVIDER ?? 'anthropic').toLowerCase()
-  return p !== 'openai-compatible' && p !== 'openai'
+/**
+ * Whether a vision model is configured (LLM_VISION_MODEL). When set, the
+ * extraction agent sends PDFs to the model as page images (via pdfToImages)
+ * instead of flattening them to text. Point LLM_VISION_MODEL at an open VLM on
+ * your OpenAI-compatible endpoint, e.g. `qwen2.5vl:7b` on Ollama. Leave it unset
+ * to stay text-only (DeepSeek), in which case PDFs are flattened with pdfToText.
+ */
+export function pdfVisionEnabled(): boolean {
+  return Boolean(process.env.LLM_VISION_MODEL?.trim())
+}
+
+/**
+ * Rasterize a PDF to base64 PNG page images (one per page, capped). This is how
+ * open-source vision models read PDFs: they take images, not PDF files, so each
+ * page is rendered and sent as an image. Works on scanned/image-only PDFs too,
+ * since it rasterizes the rendered page rather than scraping text operators.
+ *
+ * `pdf-to-img` (pdfjs-dist under the hood) is loaded dynamically so it only
+ * pulls in on the server paths that actually rasterize.
+ */
+export async function pdfToImages(
+  bytes: ArrayBuffer | Uint8Array,
+  opts?: { scale?: number; maxPages?: number },
+): Promise<string[]> {
+  const { pdf } = await import('pdf-to-img')
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  const doc = await pdf(data, { scale: opts?.scale ?? 2 })
+  const max = opts?.maxPages ?? Number.POSITIVE_INFINITY
+  const out: string[] = []
+  for await (const page of doc) {
+    if (out.length >= max) break
+    out.push(Buffer.from(page).toString('base64'))
+  }
+  return out
 }
 
 export function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {

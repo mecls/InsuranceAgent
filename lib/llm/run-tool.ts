@@ -1,23 +1,29 @@
-import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { z } from 'zod'
+import { pdfToImages } from '@/lib/services/doc-parser'
 
-// Forked from miraside/lib/llm/run-tool.ts. Forces a single named tool call,
-// Zod-validates the tool input, attaches PDFs natively to Claude (vision — no
-// separate OCR engine needed), uses ephemeral prompt caching, and supports an
-// OpenAI-compatible fallback with a bounded repair loop. Reuse this; never call
-// the SDKs directly.
+// Single, fully open-source LLM path: an OpenAI-compatible endpoint (DeepSeek via
+// Ollama Cloud for text/reasoning, an open VLM such as Qwen2.5-VL for vision).
+// Forces a single named tool call, Zod-validates the tool input, and runs a
+// bounded repair loop for models that wobble on structured output. PDFs are read
+// by rasterizing each page to an image and sending it to the vision model (open
+// models can't ingest PDF files directly). Reuse this; never call the SDK directly.
 
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6'
-const MAX_TOKENS = 16_000
-const DEFAULT_OPENAI_MAX_TOKENS = 32_000
-const MAX_OPENAI_REPAIRS = 2
+const DEFAULT_MAX_TOKENS = 32_000
+const MAX_REPAIRS = 2
 const REQUEST_TIMEOUT_MS = 60 * 60 * 1000
+const DEFAULT_VISION_MAX_PAGES = 10
 
-function openAIMaxTokens(): number {
+function maxTokensEnv(): number {
   const raw = process.env.LLM_MAX_TOKENS
   const n = raw ? Number(raw) : NaN
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_OPENAI_MAX_TOKENS
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_TOKENS
+}
+
+function visionMaxPages(): number {
+  const raw = process.env.LLM_VISION_MAX_PAGES
+  const n = raw ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_VISION_MAX_PAGES
 }
 
 function extractJsonObject(text: string | null | undefined): string | null {
@@ -130,34 +136,20 @@ function isClientError(err: unknown): boolean {
   return typeof status === 'number' && status >= 400 && status < 500
 }
 
-export type CachedTextBlock = Anthropic.TextBlockParam & {
-  cache_control?: { type: 'ephemeral' }
+/** A system prompt block. (Plain text; the provider is OpenAI-compatible.) */
+export interface SystemTextBlock {
+  type: 'text'
+  text: string
 }
 
 export interface PdfAttachment {
+  /** Base64 of the PDF bytes. Rasterized to page images for the vision model. */
   base64: string
   label?: string
 }
 
-type Provider = 'anthropic' | 'openai-compatible'
-
-function provider(): Provider {
-  const raw = (process.env.LLM_PROVIDER ?? 'anthropic').toLowerCase()
-  if (raw === 'openai-compatible' || raw === 'openai') return 'openai-compatible'
-  return 'anthropic'
-}
-
-let anthropicClient: Anthropic | null = null
-function getAnthropic(): Anthropic {
-  if (anthropicClient) return anthropicClient
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set')
-  anthropicClient = new Anthropic({ apiKey, timeout: REQUEST_TIMEOUT_MS })
-  return anthropicClient
-}
-
 let openaiClient: OpenAI | null = null
-function getOpenAI(): OpenAI {
+function getClient(): OpenAI {
   if (openaiClient) return openaiClient
   const apiKey = process.env.LLM_API_KEY
   const baseURL = process.env.LLM_BASE_URL
@@ -173,7 +165,7 @@ function getOpenAI(): OpenAI {
 }
 
 export interface RunToolParams<T> {
-  systemBlocks: CachedTextBlock[]
+  systemBlocks: SystemTextBlock[]
   userPrompt: string
   toolName: string
   toolDescription: string
@@ -184,20 +176,36 @@ export interface RunToolParams<T> {
   pdf?: PdfAttachment
   /** Multiple PDFs to attach (e.g. ACORD + supplemental). Merged with `pdf`. */
   pdfs?: PdfAttachment[]
-  /**
-   * Optional Anthropic model override (e.g. a faster model for high-volume
-   * extraction). Falls back to ANTHROPIC_MODEL then the default.
-   */
+  /** Optional model override. Falls back to LLM_VISION_MODEL (vision) / LLM_MODEL. */
   model?: string
 }
 
-export async function runTool<T>(params: RunToolParams<T>): Promise<T> {
-  return provider() === 'openai-compatible'
-    ? runViaOpenAICompatible(params)
-    : runViaAnthropic(params)
+/** Rasterize attached PDFs to base64 PNG pages (capped) for the vision model. */
+async function pdfsToImageParts(
+  pdfs: PdfAttachment[],
+  callLabel: string,
+): Promise<OpenAI.Chat.Completions.ChatCompletionContentPart[]> {
+  const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = []
+  let budget = visionMaxPages()
+  for (const p of pdfs) {
+    if (budget <= 0) break
+    const bytes = new Uint8Array(Buffer.from(p.base64, 'base64'))
+    const pages = await pdfToImages(bytes, { maxPages: budget })
+    budget -= pages.length
+    for (const b64 of pages) {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:image/png;base64,${b64}` },
+      })
+    }
+  }
+  console.log(
+    `[llm-timing] ${callLabel} rasterized ${pdfs.length} pdf(s) -> ${parts.length} page image(s)`,
+  )
+  return parts
 }
 
-async function runViaAnthropic<T>(params: RunToolParams<T>): Promise<T> {
+export async function runTool<T>(params: RunToolParams<T>): Promise<T> {
   const {
     systemBlocks,
     userPrompt,
@@ -210,106 +218,30 @@ async function runViaAnthropic<T>(params: RunToolParams<T>): Promise<T> {
     pdfs,
     model: modelOverride,
   } = params
-  const model =
-    modelOverride ?? process.env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL
+
   const allPdfs = [...(pdf ? [pdf] : []), ...(pdfs ?? [])]
-  const startedAt = Date.now()
-  console.log(
-    `[llm-timing] ${callLabel} anthropic call started model=${model}${allPdfs.length ? ` pdfs=${allPdfs.length}` : ''}`,
-  )
+  const visionCall = allPdfs.length > 0
 
-  const userContent: Anthropic.MessageCreateParams['messages'][number]['content'] =
-    allPdfs.length > 0
-      ? ([
-          ...allPdfs.map(
-            (p) =>
-              ({
-                type: 'document',
-                source: {
-                  type: 'base64',
-                  media_type: 'application/pdf',
-                  data: p.base64,
-                },
-                // Cache each document so parallel calls reuse it.
-                cache_control: { type: 'ephemeral' },
-              }) as unknown as Anthropic.MessageCreateParams['messages'][number]['content'][number],
-          ),
-          { type: 'text', text: userPrompt },
-        ] as Anthropic.MessageCreateParams['messages'][number]['content'])
-      : userPrompt
-
-  const response = await getAnthropic().messages.create({
-    model,
-    max_tokens: MAX_TOKENS,
-    system: systemBlocks as unknown as Anthropic.TextBlockParam[],
-    tools: [
-      {
-        name: toolName,
-        description: toolDescription,
-        input_schema: toolInputSchema as unknown as Anthropic.Tool['input_schema'],
-      },
-    ],
-    tool_choice: { type: 'tool', name: toolName },
-    messages: [{ role: 'user', content: userContent }],
-  })
-
-  const elapsedMs = Date.now() - startedAt
-  const usage = response.usage as Anthropic.Usage & {
-    cache_read_input_tokens?: number
-    cache_creation_input_tokens?: number
-  }
-  console.log(
-    `[llm-timing] ${callLabel} ms=${elapsedMs} stop=${response.stop_reason} in=${usage.input_tokens} out=${usage.output_tokens} cache_read=${usage.cache_read_input_tokens ?? 0} cache_create=${usage.cache_creation_input_tokens ?? 0}`,
-  )
-
-  const toolUse = response.content.find(
-    (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
-  )
-  if (!toolUse) {
-    const textBlocks = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
+  if (visionCall && !modelOverride && !process.env.LLM_VISION_MODEL) {
     throw new Error(
-      `[${callLabel}] no tool_use block. stop_reason=${response.stop_reason} text=${textBlocks.join(' | ').slice(0, 400)}`,
+      `[${callLabel}] PDF input requires a vision model. Set LLM_VISION_MODEL (e.g. qwen2.5vl:7b) on your OpenAI-compatible endpoint.`,
     )
   }
-  if (toolUse.name !== toolName) {
-    throw new Error(`[${callLabel}] unexpected tool name: ${toolUse.name}`)
-  }
-  const parsed = schema.safeParse(toolUse.input)
-  if (!parsed.success) {
-    const inputPreview = JSON.stringify(toolUse.input).slice(0, 600)
-    throw new Error(
-      `[${callLabel}] schema validation failed: ${JSON.stringify(parsed.error.issues).slice(0, 800)} | input=${inputPreview}`,
-    )
-  }
-  return parsed.data
-}
+  const envModel = visionCall
+    ? process.env.LLM_VISION_MODEL ?? process.env.LLM_MODEL
+    : process.env.LLM_MODEL
+  const model: string = modelOverride ?? envModel ?? ''
+  if (!model) throw new Error('LLM_MODEL not set')
 
-async function runViaOpenAICompatible<T>(params: RunToolParams<T>): Promise<T> {
-  const {
-    systemBlocks,
-    userPrompt,
-    toolName,
-    toolDescription,
-    toolInputSchema,
-    schema,
-    callLabel,
-    pdf,
-    pdfs,
-  } = params
-  if (pdf || (pdfs && pdfs.length > 0)) {
-    throw new Error(
-      `[${callLabel}] PDF attachments are only supported on the Anthropic provider. Set LLM_PROVIDER=anthropic.`,
-    )
-  }
-  const envModel = process.env.LLM_MODEL
-  if (!envModel) throw new Error('LLM_MODEL not set')
-  const model: string = envModel
-
-  const maxTokens = openAIMaxTokens()
+  const maxTokens = maxTokensEnv()
   const systemText = systemBlocks.map((b) => b.text).join('\n\n')
-  const client = getOpenAI()
+  const client = getClient()
+
+  const imageParts = visionCall ? await pdfsToImageParts(allPdfs, callLabel) : []
+  const userContent: OpenAI.Chat.Completions.ChatCompletionUserMessageParam['content'] =
+    imageParts.length > 0
+      ? [...imageParts, { type: 'text', text: userPrompt }]
+      : userPrompt
 
   const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     {
@@ -324,7 +256,7 @@ async function runViaOpenAICompatible<T>(params: RunToolParams<T>): Promise<T> {
 
   const baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemText },
-    { role: 'user', content: userPrompt },
+    { role: 'user', content: userContent },
   ]
 
   async function complete(
@@ -362,7 +294,7 @@ async function runViaOpenAICompatible<T>(params: RunToolParams<T>): Promise<T> {
 
   const startedAt = Date.now()
   console.log(
-    `[llm-timing] ${callLabel} openai-compatible call started model=${model} maxTokens=${maxTokens} baseURL=${process.env.LLM_BASE_URL}`,
+    `[llm-timing] ${callLabel} call started model=${model} maxTokens=${maxTokens}${imageParts.length ? ` images=${imageParts.length}` : ''} baseURL=${process.env.LLM_BASE_URL}`,
   )
 
   const { response, forced } = await complete(baseMessages, true)
@@ -380,9 +312,9 @@ async function runViaOpenAICompatible<T>(params: RunToolParams<T>): Promise<T> {
   let sawLength = candidate.source === 'length'
   const firstError = outcome.error
 
-  for (let attempt = 1; attempt <= MAX_OPENAI_REPAIRS && !outcome.ok; attempt++) {
+  for (let attempt = 1; attempt <= MAX_REPAIRS && !outcome.ok; attempt++) {
     console.log(
-      `[${callLabel}] output unusable (source=${candidate.source}); repair ${attempt}/${MAX_OPENAI_REPAIRS}. err=${outcome.error.slice(0, 300)}`,
+      `[${callLabel}] output unusable (source=${candidate.source}); repair ${attempt}/${MAX_REPAIRS}. err=${outcome.error.slice(0, 300)}`,
     )
     messages = [
       ...messages,
@@ -405,9 +337,9 @@ async function runViaOpenAICompatible<T>(params: RunToolParams<T>): Promise<T> {
   if (outcome.ok) return outcome.data
 
   const lengthHint = sawLength
-    ? ` (hit max_tokens=${maxTokens} before completing output; raise LLM_MAX_TOKENS or set LLM_PROVIDER=anthropic)`
+    ? ` (hit max_tokens=${maxTokens} before completing output; raise LLM_MAX_TOKENS)`
     : ''
   throw new Error(
-    `[${callLabel}] failed after ${MAX_OPENAI_REPAIRS} repair attempts${lengthHint}. firstErr=${firstError.slice(0, 250)} | lastErr=${outcome.error.slice(0, 250)}`,
+    `[${callLabel}] failed after ${MAX_REPAIRS} repair attempts${lengthHint}. firstErr=${firstError.slice(0, 250)} | lastErr=${outcome.error.slice(0, 250)}`,
   )
 }
