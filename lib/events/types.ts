@@ -1,4 +1,4 @@
-import type { NodeId } from '@/lib/underwriting/nodes'
+import type { NodeId } from '@/lib/procurement/nodes'
 
 /**
  * The event model is the backbone of the system. Every agent emits structured

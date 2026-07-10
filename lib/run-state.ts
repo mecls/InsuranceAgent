@@ -1,5 +1,5 @@
 import type { RunEvent } from '@/lib/events/types'
-import { NODES, type NodeId } from '@/lib/underwriting/nodes'
+import { NODES, type NodeId } from '@/lib/procurement/nodes'
 
 /**
  * Pure run state machine. Both live mode and Replay feed the same `RunEvent`

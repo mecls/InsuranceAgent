@@ -3,17 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { ReactFlowProvider } from '@xyflow/react'
-import { Clock, History, Download, Loader2, Mail } from 'lucide-react'
+import { Clock, History, Download, Loader2 } from 'lucide-react'
 import { useRunStream } from './use-run-stream'
 import { useReplay } from './use-replay'
 import { RunGraph } from '@/components/graph/run-graph'
 import { DetailPanel } from '@/components/graph/detail-panel'
 import { ReplayBar } from './replay-bar'
-import { GapApprovalBanner } from './gap-approval-banner'
+import { GateBanner } from './gate-banner'
 import { RunReview } from './review-sections'
 import { StatusChip, type DisplayStatus } from '@/components/ui/status-chip'
-import type { CaseFile } from '@/lib/underwriting/case-file'
-import { type NodeId } from '@/lib/underwriting/nodes'
+import type { CaseFile } from '@/lib/procurement/case-file'
+import { type NodeId } from '@/lib/procurement/nodes'
 import { formatElapsed } from '@/lib/format'
 import { SITE_CONFIG } from '@/lib/site-config'
 import { cn } from '@/lib/utils'
@@ -21,7 +21,6 @@ import { cn } from '@/lib/utils'
 interface CaseFileResponse {
   status: string
   caseFile: CaseFile | null
-  boundPolicy: { policyNumber: string; boundAt: string } | null
 }
 
 type View = 'flow' | 'quote'
@@ -29,12 +28,10 @@ type View = 'flow' | 'quote'
 export function RunDetail({
   runId,
   submissionLabel,
-  insuredName,
 }: {
   runId: string
   slug: string
   submissionLabel: string
-  insuredName: string | null
 }) {
   const { state: liveState } = useRunStream(runId)
   const [replayMode, setReplayMode] = useState(false)
@@ -49,6 +46,8 @@ export function RunDetail({
 
   const phase = liveState.phase
   const ready = phase === 'ready'
+  const awaitOpen = liveState.nodes['await-customer'].status === 'awaiting_human'
+  const reviewOpen = liveState.nodes.review.status === 'awaiting_human'
 
   const fetchCase = useCallback(async () => {
     try {
@@ -59,7 +58,6 @@ export function RunDetail({
     }
   }, [runId])
 
-  // Data fetch: on mount, on every phase change, and polled while live.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch; setState runs after await
     void fetchCase()
@@ -68,7 +66,11 @@ export function RunDetail({
     return () => window.clearInterval(id)
   }, [phase, fetchCase])
 
-  // Tick the elapsed clock while live.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch; setState runs after await
+    if (reviewOpen) void fetchCase()
+  }, [reviewOpen, fetchCase])
+
   useEffect(() => {
     if (phase !== 'running') return
     const id = window.setInterval(() => setNow(Date.now()), 200)
@@ -76,19 +78,18 @@ export function RunDetail({
   }, [phase])
 
   const cf = data?.caseFile ?? null
-  const bound = data?.boundPolicy != null
-  const hasReview = !!(cf && (cf.quote || cf.declined || cf.appetite || cf.audit))
+  const sent = !!cf?.sent
+  const hasQuote = !!(cf && (cf.lineItems?.length || cf.quote || cf.sent || cf.closedWithoutQuote))
 
-  // Auto-switch to the Quote once, when the run finishes and review data exists.
   useEffect(() => {
-    if (!didAutoSwitch.current && ready && hasReview) {
+    if (!didAutoSwitch.current && hasQuote && (reviewOpen || ready)) {
       didAutoSwitch.current = true
       setView('quote')
     }
-  }, [ready, hasReview])
+  }, [reviewOpen, ready, hasQuote])
 
   const elapsed = formatElapsed(traceState.startedAt, traceState.endedAt, now)
-  const ds: DisplayStatus = bound
+  const ds: DisplayStatus = sent
     ? 'bound'
     : phase === 'ready'
       ? 'ready'
@@ -97,43 +98,21 @@ export function RunDetail({
         : phase === 'running'
           ? 'running'
           : 'pending'
-  const name = insuredName ?? cf?.submission.insured?.name ?? submissionLabel
+  const name = cf?.request.summary || submissionLabel
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Header bar */}
       <header className="flex min-h-[60px] shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-[var(--color-border)] bg-white px-5 py-3">
         <nav className="flex items-center gap-2 text-[13px] text-[var(--color-text-muted)]">
-          <Link href="/dashboard" className="hover:text-[var(--color-text-secondary)]">
-            Dashboard
-          </Link>
+          <Link href="/dashboard" className="hover:text-[var(--color-text-secondary)]">Painel</Link>
           <span className="text-[var(--color-text-placeholder)]">›</span>
           <span className="font-medium text-[var(--color-text-primary)]">{name}</span>
-          {cf?.submission.source?.type === 'gmail' && cf.submission.source.permalink && (
-            <a
-              href={cf.submission.source.permalink}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-1 inline-flex items-center gap-1 rounded-md bg-[var(--color-brand-light)] px-2 py-0.5 text-xs font-medium text-[var(--color-brand)] hover:underline"
-            >
-              <Mail className="size-3" /> View in Gmail
-            </a>
-          )}
         </nav>
 
         <div className="flex items-center gap-4">
-          {/* Flow / Quote toggle */}
           <div className="inline-flex items-center gap-1 rounded-lg bg-[#F1F3F6] p-1">
-            <ToggleBtn active={view === 'flow'} onClick={() => setView('flow')}>
-              Flow
-            </ToggleBtn>
-            <ToggleBtn
-              active={view === 'quote'}
-              disabled={!hasReview}
-              onClick={() => setView('quote')}
-            >
-              Quote
-            </ToggleBtn>
+            <ToggleBtn active={view === 'flow'} onClick={() => setView('flow')}>Fluxo</ToggleBtn>
+            <ToggleBtn active={view === 'quote'} disabled={!hasQuote} onClick={() => setView('quote')}>Orçamento</ToggleBtn>
           </div>
 
           <StatusChip status={ds} />
@@ -146,26 +125,20 @@ export function RunDetail({
 
           {view === 'flow' && ready && !replayMode && (
             <button onClick={() => setReplayMode(true)} className="btn-ghost whitespace-nowrap">
-              <History className="size-3.5 shrink-0" /> Replay
+              <History className="size-3.5 shrink-0" /> Repetir
             </button>
           )}
-          {hasReview && (
-            <a
-              href={`/api/runs/${runId}/quote-pdf`}
-              download
-              className="btn-secondary whitespace-nowrap"
-            >
-              <Download className="size-4 shrink-0" /> Download Quote
+          {sent && (
+            <a href={`/api/runs/${runId}/quote-pdf`} download className="btn-secondary whitespace-nowrap">
+              <Download className="size-4 shrink-0" /> PDF
             </a>
           )}
         </div>
       </header>
 
-      {!replayMode && liveState.nodes.gap.status === 'awaiting_human' && (
-        <GapApprovalBanner runId={runId} gap={liveState.nodes.gap} />
-      )}
+      {!replayMode && awaitOpen && <GateBanner node={liveState.nodes['await-customer']} variant="customer" />}
+      {!replayMode && reviewOpen && <GateBanner node={liveState.nodes.review} variant="review" />}
 
-      {/* Body — full-screen flow OR the quote review */}
       <div className="min-h-0 flex-1">
         {view === 'flow' ? (
           <div className="flex h-full min-h-0 flex-col">
@@ -176,11 +149,7 @@ export function RunDetail({
                 </ReactFlowProvider>
               </div>
               {selected && (
-                <DetailPanel
-                  nodeId={selected}
-                  node={traceState.nodes[selected]}
-                  onClose={() => setSelected(null)}
-                />
+                <DetailPanel nodeId={selected} node={traceState.nodes[selected]} onClose={() => setSelected(null)} />
               )}
             </div>
             {replayMode && (
@@ -202,16 +171,10 @@ export function RunDetail({
           <div className="h-full overflow-y-auto">
             <div className="mx-auto max-w-[900px] px-5 py-8">
               {cf ? (
-                <RunReview
-                  runId={runId}
-                  caseFile={cf}
-                  boundPolicy={data?.boundPolicy ?? null}
-                  onBound={fetchCase}
-                />
+                <RunReview runId={runId} caseFile={cf} reviewOpen={reviewOpen} onAction={fetchCase} />
               ) : (
                 <div className="card flex items-center justify-center gap-2 px-6 py-16 text-sm text-[var(--color-text-muted)]">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading…
+                  <Loader2 className="size-4 animate-spin" /> A carregar…
                 </div>
               )}
             </div>

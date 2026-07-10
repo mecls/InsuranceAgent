@@ -23,7 +23,7 @@ export default function AppLayout({
           </Link>
           <span className="h-4 w-px bg-[var(--color-border)]" />
           <span className="text-[13px] text-[var(--color-text-muted)]">
-            {SITE_CONFIG.lineOfBusinessLabel}
+            Compras · Orçamentos
           </span>
         </div>
         <AccountMenu initial={AVATAR_INITIAL} />

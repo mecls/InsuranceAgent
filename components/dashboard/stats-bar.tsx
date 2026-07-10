@@ -1,18 +1,18 @@
 interface StatsBarProps {
   thisWeek: number
-  quoteReady: number
+  drafts: number
   inProgress: number
-  bound: number
+  sent: number
 }
 
-/** Real-time snapshot of the underwriting desk. */
-export function StatsBar({ thisWeek, quoteReady, inProgress, bound }: StatsBarProps) {
+/** Real-time snapshot of the quoting desk. */
+export function StatsBar({ thisWeek, drafts, inProgress, sent }: StatsBarProps) {
   return (
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-border)] sm:grid-cols-4">
-      <Stat label="This Week" value={thisWeek} />
-      <Stat label="Quote Ready" value={quoteReady} />
-      <Stat label="In Progress" value={inProgress} />
-      <Stat label="Bound" value={bound} accent />
+      <Stat label="Esta semana" value={thisWeek} />
+      <Stat label="Por iniciar" value={drafts} />
+      <Stat label="Em curso" value={inProgress} />
+      <Stat label="Enviados" value={sent} accent />
     </div>
   )
 }

@@ -1,11 +1,7 @@
 export const SITE_CONFIG = {
-  brand: 'InsuranceAgent',
+  brand: 'Miraside Orçamentos',
   description:
-    'Agentic underwriting assistant — broker submission to quote-ready file, with a live node-graph of every phase.',
-  // Demo line of business. Drives the required-fields checklist, the appetite
-  // ruleset, and the research focus.
-  lineOfBusiness: 'general_liability' as const,
-  lineOfBusinessLabel: 'Commercial General Liability',
+    'Agente de orçamentos: recebe o pedido do cliente, esclarece os detalhes, calcula os preços do catálogo e envia o orçamento, com o fluxo todo visível. Sem um único telefonema.',
   // The cycle-time banner compares the live run against a manual baseline.
-  manualBaselineLabel: '~3 days manual',
+  manualBaselineLabel: '~2 dias a orçamentar',
 } as const

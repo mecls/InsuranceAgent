@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { nodeDef, type NodeId } from '@/lib/underwriting/nodes'
+import { nodeDef, type NodeId } from '@/lib/procurement/nodes'
 import type { NodeState } from '@/lib/run-state'
 import { formatDuration } from '@/lib/format'
 import { cn } from '@/lib/utils'

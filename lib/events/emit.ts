@@ -1,5 +1,5 @@
 import { supabaseService } from '@/lib/supabase/service'
-import type { NodeId } from '@/lib/underwriting/nodes'
+import type { NodeId } from '@/lib/procurement/nodes'
 import {
   rowToEvent,
   type EventPayload,

@@ -10,38 +10,30 @@ export interface RunSummary {
   id: string
   slug: string
   label: string
-  insuredName: string | null
-  brokerName: string | null
   status: string
-  bound: boolean
-  policyNumber: string | null
+  sent: boolean
+  customer: string | null
   createdAt: string
   readyAt: string | null
 }
 
-type Tab = 'all' | 'bound' | 'downloads'
+type Tab = 'all' | 'sent' | 'downloads'
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'all', label: 'All Submissions' },
-  { id: 'bound', label: 'Bound Policies' },
-  { id: 'downloads', label: 'Downloads' },
+  { id: 'all', label: 'Todos os casos' },
+  { id: 'sent', label: 'Enviados' },
+  { id: 'downloads', label: 'Descargas' },
 ]
 
 export function SubmissionsTabs({ runs }: { runs: RunSummary[] }) {
   const [tab, setTab] = useState<Tab>('all')
-  const bound = runs.filter((r) => r.bound)
-  // A quote PDF is available once the run reaches a quote-ready (or bound) state.
-  const downloadable = runs.filter((r) => r.status === 'ready' || r.bound)
+  const sent = runs.filter((r) => r.sent)
 
   return (
     <div>
       <div className="mb-4 flex items-center gap-1">
         {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn('tab', tab === t.id && 'tab-active')}
-          >
+          <button key={t.id} onClick={() => setTab(t.id)} className={cn('tab', tab === t.id && 'tab-active')}>
             {t.label}
           </button>
         ))}
@@ -49,7 +41,7 @@ export function SubmissionsTabs({ runs }: { runs: RunSummary[] }) {
 
       {tab === 'all' &&
         (runs.length === 0 ? (
-          <Empty message="No submissions yet. Upload one above to get started." />
+          <Empty message="Ainda não há casos. Abra um acima ou lance uma demonstração." />
         ) : (
           <div className="card overflow-hidden px-6">
             {runs.map((r) => (
@@ -58,26 +50,23 @@ export function SubmissionsTabs({ runs }: { runs: RunSummary[] }) {
           </div>
         ))}
 
-      {tab === 'bound' &&
-        (bound.length === 0 ? (
-          <Empty message="No bound policies yet. Bound submissions appear here." />
+      {tab === 'sent' &&
+        (sent.length === 0 ? (
+          <Empty message="Ainda não há orçamentos enviados." />
         ) : (
           <div className="card overflow-hidden px-6">
-            {bound.map((r) => (
-              <SubmissionRow key={r.id} run={r} showPolicy />
+            {sent.map((r) => (
+              <SubmissionRow key={r.id} run={r} showSent />
             ))}
           </div>
         ))}
 
       {tab === 'downloads' &&
-        (downloadable.length === 0 ? (
-          <Empty
-            icon
-            message="No downloads yet. Quotes appear here once a submission reaches Quote Ready status."
-          />
+        (sent.length === 0 ? (
+          <Empty icon message="Sem descargas. Os orçamentos enviados aparecem aqui em PDF." />
         ) : (
           <div className="card overflow-hidden px-6">
-            {downloadable.map((r) => (
+            {sent.map((r) => (
               <DownloadRow key={r.id} run={r} />
             ))}
           </div>
@@ -86,38 +75,27 @@ export function SubmissionsTabs({ runs }: { runs: RunSummary[] }) {
   )
 }
 
-function SubmissionRow({ run, showPolicy }: { run: RunSummary; showPolicy?: boolean }) {
-  const name = run.insuredName || run.label || 'Uploaded GL submission'
+function SubmissionRow({ run, showSent }: { run: RunSummary; showSent?: boolean }) {
+  const name = run.label || 'Caso de orçamento'
   return (
     <div className="relative flex items-center gap-4 border-b border-[#F3F4F6] py-3.5 transition-colors last:border-0 hover:bg-[#F9FAFB]">
-      <Link
-        href={`/dashboard/runs/${run.slug}`}
-        className="absolute inset-0"
-        aria-label={`Open ${name}`}
-      />
+      <Link href={`/dashboard/runs/${run.slug}`} className="absolute inset-0" aria-label={`Abrir ${name}`} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{name}</div>
-        {run.brokerName && (
-          <div className="truncate text-xs text-[var(--color-text-muted)]">{run.brokerName}</div>
-        )}
+        {run.customer && <div className="truncate text-xs text-[var(--color-text-muted)]">{run.customer}</div>}
       </div>
       <div className="hidden shrink-0 text-xs text-[var(--color-text-placeholder)] tabular sm:block">
         {fmtDate(run.readyAt ?? run.createdAt)}
       </div>
-      <StatusChip status={displayStatus(run.status, run.bound)} className="shrink-0" />
-      {showPolicy && run.policyNumber && (
-        <span className="hidden shrink-0 font-mono text-xs text-[var(--color-text-secondary)] sm:block">
-          {run.policyNumber}
-        </span>
-      )}
-      {showPolicy && (
+      <StatusChip status={displayStatus(run.status, run.sent)} className="shrink-0" />
+      {showSent && (
         <a
           href={`/api/runs/${run.id}/quote-pdf`}
           download
           onClick={(e) => e.stopPropagation()}
           className="relative z-10 grid size-7 place-items-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-brand-light)] hover:text-[var(--color-brand)]"
-          aria-label="Download quote PDF"
-          title="Download quote PDF"
+          aria-label="Descarregar orçamento"
+          title="Descarregar orçamento"
         >
           <Download className="size-4" />
         </a>
@@ -128,32 +106,21 @@ function SubmissionRow({ run, showPolicy }: { run: RunSummary; showPolicy?: bool
 }
 
 function DownloadRow({ run }: { run: RunSummary }) {
-  const name = run.insuredName || run.label || 'Uploaded GL submission'
+  const name = run.label || 'Caso de orçamento'
   return (
     <div className="flex items-center gap-3 border-b border-[#F3F4F6] py-3.5 last:border-0">
       <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[var(--color-danger-bg)] text-[var(--color-danger)]">
         <FileText className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">
-          {name} — GL Quote.pdf
-        </div>
-        <div className="truncate text-xs text-[var(--color-text-muted)]">
-          {name}
-          {run.policyNumber && (
-            <>
-              {' · '}
-              <span className="font-mono">{run.policyNumber}</span>
-            </>
-          )}
-        </div>
+        <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{name} — Orçamento.pdf</div>
+        {run.customer && <div className="truncate text-xs text-[var(--color-text-muted)]">{run.customer}</div>}
       </div>
       <div className="hidden shrink-0 text-xs text-[var(--color-text-placeholder)] tabular sm:block">
         {fmtDate(run.readyAt ?? run.createdAt)}
       </div>
       <a href={`/api/runs/${run.id}/quote-pdf`} download className="btn-secondary shrink-0">
-        <Download className="size-4" />
-        Download
+        <Download className="size-4" /> Descarregar
       </a>
     </div>
   )
@@ -170,10 +137,5 @@ function Empty({ message, icon }: { message: string; icon?: boolean }) {
 
 function fmtDate(iso: string): string {
   const d = new Date(iso)
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  return d.toLocaleString('pt-PT', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }

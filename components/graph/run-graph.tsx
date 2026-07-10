@@ -10,7 +10,7 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { EDGES, NODES, type NodeId } from '@/lib/underwriting/nodes'
+import { EDGES, NODES, type NodeId } from '@/lib/procurement/nodes'
 import type { RunState } from '@/lib/run-state'
 import { AgentNode, type AgentNodeData } from './agent-node'
 

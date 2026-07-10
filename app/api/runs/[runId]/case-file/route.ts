@@ -5,8 +5,7 @@ export const runtime = 'nodejs'
 
 /**
  * Returns the run's current Case File + status. The review surface fetches this
- * once the live stream reports the run is ready, to render the quote, dossier,
- * appetite rationale, and audit trail.
+ * to render the side-by-side comparison, the ranking, and the adjudicação.
  */
 export async function GET(
   _req: NextRequest,
@@ -18,6 +17,5 @@ export async function GET(
   return Response.json({
     status: run.status,
     caseFile: run.case_file,
-    boundPolicy: run.bound_policy,
   })
 }

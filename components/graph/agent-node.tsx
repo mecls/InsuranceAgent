@@ -3,31 +3,31 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import {
   Inbox,
-  FileSearch,
-  ListChecks,
-  Globe,
-  Scale,
+  MessageCircleQuestion,
+  Clock,
   Calculator,
-  ShieldCheck,
+  FileText,
+  UserCheck,
+  Send,
   Loader2,
   Check,
   TriangleAlert,
   CircleDashed,
   Hand,
 } from 'lucide-react'
-import type { NodeId } from '@/lib/underwriting/nodes'
+import type { NodeId } from '@/lib/procurement/nodes'
 import type { NodeState, NodeStatus } from '@/lib/run-state'
 import { formatDuration } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 const ICONS: Record<NodeId, React.ComponentType<{ className?: string }>> = {
   intake: Inbox,
-  extraction: FileSearch,
-  gap: ListChecks,
-  research: Globe,
-  appetite: Scale,
-  pricing: Calculator,
-  compliance: ShieldCheck,
+  clarify: MessageCircleQuestion,
+  'await-customer': Clock,
+  price: Calculator,
+  'draft-quote': FileText,
+  review: UserCheck,
+  send: Send,
 }
 
 const STATUS_RING: Record<NodeStatus, string> = {

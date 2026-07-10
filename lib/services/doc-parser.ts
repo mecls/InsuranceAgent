@@ -1,19 +1,16 @@
 import PostalMime from 'postal-mime'
 import * as XLSX from 'xlsx'
-import type { AttachmentManifestItem } from '@/lib/underwriting/case-file'
 
 /**
  * DocParser — real ingestion adapters behind a clean interface.
- *  - `.eml`  → headers + body + attachments (postal-mime)
- *  - `.xlsx` → CSV text the LLM can read (SheetJS); loss-run workbooks are
- *              flattened to text first (no model ingests xlsx natively)
+ *  - `.eml`  → headers + body + attachments (postal-mime), used to ingest
+ *              fornecedor replies that arrive as forwarded emails
+ *  - `.xlsx` → CSV text the LLM can read (SheetJS)
  *  - PDFs    → rasterized to page images for an open vision model (pdfToImages),
  *              or flattened to text (pdfToText) when no vision model is set
  *
- * Production swaps these for carrier-tuned parsers; the interface stays put.
+ * Production swaps these for tuned parsers; the interface stays put.
  */
-
-export type AttachmentKind = AttachmentManifestItem['kind']
 
 export interface ParsedEmail {
   from: { name?: string; address?: string }
@@ -24,25 +21,6 @@ export interface ParsedEmail {
     mimeType: string
     bytes: Uint8Array
   }[]
-}
-
-/** Classify a submission attachment by filename + mime. Heuristic, deterministic. */
-export function classifyAttachment(
-  filename: string,
-  mime: string,
-): AttachmentKind {
-  const f = filename.toLowerCase()
-  if (/acord.*125|125.*acord|\bgl\b.*app|commercial.*app/.test(f)) return 'acord_125'
-  if (/acord.*126|126.*acord|liability.*section/.test(f)) return 'acord_126'
-  if (/loss.?run|losses|claims/.test(f) || mime.includes('spreadsheet') || f.endsWith('.xlsx') || f.endsWith('.csv')) {
-    return 'loss_run'
-  }
-  if (/sov|statement.*values|schedule.*values/.test(f)) return 'sov'
-  if (/supplement|gl.?supp|questionnaire/.test(f)) return 'gl_supplemental'
-  if (/cover|letter|email|message|narrative/.test(f) || mime.startsWith('text/')) {
-    return 'cover_letter'
-  }
-  return 'unknown'
 }
 
 export async function parseEml(bytes: ArrayBuffer | Uint8Array): Promise<ParsedEmail> {

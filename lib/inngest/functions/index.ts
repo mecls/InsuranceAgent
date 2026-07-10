@@ -1,7 +1,7 @@
-import { runUnderwriting } from './run-underwriting'
+import { runQuote } from './run-quote'
+import { prepareDraft } from './prepare-draft'
 
 /**
- * Single registry of Inngest functions served at /api/inngest. Append new
- * functions here as milestones land.
+ * Single registry of Inngest functions served at /api/inngest.
  */
-export const functions = [runUnderwriting]
+export const functions = [runQuote, prepareDraft]

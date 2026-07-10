@@ -17,8 +17,7 @@ export default async function RunPage({
     <RunDetail
       runId={run.id}
       slug={run.slug}
-      submissionLabel={run.submission_label}
-      insuredName={run.case_file?.submission?.insured?.name ?? null}
+      submissionLabel={run.case_file?.request?.summary ?? run.submission_label}
     />
   )
 }

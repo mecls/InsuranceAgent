@@ -1,15 +1,12 @@
 import type { RunRow } from '@/lib/db/runs'
-import type { CaseFile } from '@/lib/underwriting/case-file'
+import { customerLabel, type CaseFile } from '@/lib/procurement/case-file'
+import { euro } from '@/lib/procurement/pricing'
 import { SITE_CONFIG } from '@/lib/site-config'
-import { formatCurrency } from '@/lib/format'
 
 /**
- * Quote PDF — the finished, downloadable quotation. Built with a small
- * dependency-free PDF composer that supports color, badge "pills", panels and
- * table hairlines, so the export keeps the same visual cues as the on-screen
- * review (SIMULATED / INSUFFICIENT DATA tags, REFER/FLAG badges, rose warning
- * text, green bound notice). Deterministic: it just renders the Case File, and
- * carries every reliability / unread-document caveat through to print.
+ * Orçamento PDF — the customer-facing quote (line items, totals, terms). Built
+ * with a small dependency-free PDF composer. Deterministic: it just renders the
+ * Case File.
  */
 
 // ── Colors (Tailwind-matched, 0..1 rgb) ─────────────────────────────────────
@@ -259,163 +256,82 @@ function render(els: El[]): Uint8Array {
   return new Uint8Array(Buffer.from(pdf, 'latin1'))
 }
 
-// ── Quote document content ───────────────────────────────────────────────────
+
+// ── Document content ─────────────────────────────────────────────────────────
 const TODAY = () =>
-  new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  new Date().toLocaleDateString('pt-PT', { year: 'numeric', month: 'long', day: 'numeric' })
 
 const heading = (text: string): El => ({ t: 'text', text, size: 12, bold: true, color: C.ink, gapBefore: 16 })
 const kv = (label: string, value: string, topBorder = false): El => ({ t: 'kv', label, value, size: 10, topBorder })
 
 export function quoteRef(slug: string): string {
-  return `GL-Q-${slug.toUpperCase()}`
+  return `ORC-${slug.toUpperCase()}`
 }
+
 export function quoteFilename(caseFile: CaseFile | null, slug: string): string {
-  const name = caseFile?.submission.insured?.name ?? 'submission'
-  const safe = name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
-  return `quote-${safe || 'submission'}-${slug}.pdf`
+  const name = caseFile?.request?.summary ?? 'orcamento'
+  const safe = name
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50)
+  return `orcamento-${safe || 'cliente'}-${slug}.pdf`
 }
 
-const decisionColors = (d: 'in' | 'out' | 'refer'): { bg: Color; fg: Color; label: string } =>
-  d === 'in'
-    ? { bg: C.greenBg, fg: C.greenFg, label: 'IN APPETITE' }
-    : d === 'out'
-      ? { bg: C.roseBg, fg: C.roseFg, label: 'OUT OF APPETITE' }
-      : { bg: C.amberBg, fg: C.amberFg, label: 'REFER' }
-
-/** Build the quote (or decline notice) PDF for a finished run. */
+/** Build the customer-facing orçamento PDF for a run. */
 export function buildQuotePdf(run: RunRow): Uint8Array {
   const cf = run.case_file
   const els: El[] = []
 
-  // Header.
-  els.push({ t: 'text', text: `${SITE_CONFIG.brand} — Indicative Quotation`, size: 18, bold: true, color: C.ink })
-  els.push({ t: 'text', text: SITE_CONFIG.lineOfBusinessLabel, size: 10, color: C.n500, gapBefore: 2 })
-  els.push(kv('Quote ref', quoteRef(run.slug)))
-  els.push(kv('Date', TODAY()))
+  els.push({ t: 'text', text: SITE_CONFIG.brand, size: 18, bold: true, color: C.ink })
+  els.push({ t: 'text', text: 'Orçamento', size: 11, color: C.n500, gapBefore: 2 })
 
   if (!cf) {
-    els.push({ t: 'text', text: 'Case file not available.', size: 10, color: C.n700, gapBefore: 16 })
+    els.push({ t: 'text', text: 'Caso não disponível.', size: 10, color: C.n700, gapBefore: 16 })
     return render(els)
   }
 
-  if (run.bound_policy) {
-    els.push({
-      t: 'panel',
-      bg: C.greenBg,
-      gapBefore: 12,
-      lines: [{ text: `Bound — policy ${run.bound_policy.policyNumber} (demo record)`, size: 10, color: C.greenFg, bold: true }],
-    })
+  els.push(kv('Referência', quoteRef(run.slug)))
+  els.push(kv('Data', TODAY()))
+  els.push(kv('Cliente', customerLabel(cf)))
+  els.push(kv('Pedido', cf.request.summary))
+
+  els.push(heading('Descrição dos trabalhos'))
+  for (const l of cf.lineItems) {
+    els.push(kv(`${l.description} (${l.quantity} ${l.unit} x ${euro(l.unitPrice)})`, euro(l.total), true))
   }
 
-  const insured = cf.submission.insured
-  const coverage = cf.submission.coverage
-
-  els.push(heading('Named insured'))
-  els.push(kv('Insured', insured?.name ?? 'Not stated'))
-  if (insured?.address) els.push(kv('Address', insured.address))
-  if (insured?.fein) els.push(kv('FEIN', insured.fein))
-  if (insured?.naics) els.push(kv('NAICS', insured.naics))
-  if (insured?.yearsInBusiness != null) els.push(kv('Years in business', String(insured.yearsInBusiness)))
-
-  els.push(heading('Coverage requested'))
-  els.push(kv('Per-occurrence limit', coverage?.occurrenceLimit != null ? formatCurrency(coverage.occurrenceLimit) : 'Not stated'))
-  els.push(kv('General aggregate limit', coverage?.aggregateLimit != null ? formatCurrency(coverage.aggregateLimit) : 'Not stated'))
-  if (coverage?.deductible != null) els.push(kv('Deductible', formatCurrency(coverage.deductible)))
-  if (coverage?.requestedEffectiveDate) els.push(kv('Requested effective date', coverage.requestedEffectiveDate))
-
-  if (cf.unreadableDocuments && cf.unreadableDocuments.length > 0) {
-    els.push(heading('Data quality warning'))
-    els.push({
-      t: 'panel',
-      bg: C.roseBgSoft,
-      lines: [
-        {
-          text: `${cf.unreadableDocuments.length} submission document(s) could not be read: ${cf.unreadableDocuments.join(', ')}. Fields shown as "Not stated" may be present in these files. Re-process with a vision model before relying on this quotation.`,
-          size: 10,
-          color: C.roseFg,
-        },
-      ],
-    })
+  const p = cf.pricing
+  if (p) {
+    els.push(heading('Totais'))
+    els.push(kv('Subtotal', euro(p.subtotal)))
+    for (const b of p.ivaBreakdown) els.push(kv(`IVA ${b.rate}%`, euro(b.amount)))
+    els.push(kv('Total (c/IVA)', euro(p.total), true))
   }
 
-  // Declined path.
-  if (cf.declined || !cf.quote) {
-    els.push(heading('Disposition'))
-    els.push({
-      t: 'row',
-      segs: [{ kind: 'badge', text: cf.declined ? 'DECLINED' : 'NO QUOTE', size: 10, bg: C.roseBg, color: C.roseFg }],
-    })
-    if (cf.appetite) {
-      els.push({ t: 'text', text: `Score ${cf.appetite.score.toFixed(2)}`, size: 10, color: C.n500, gapBefore: 6 })
-      for (const r of cf.appetite.reasons) els.push({ t: 'bullet', text: r, size: 10, color: C.n700, dot: C.n400 })
+  const q = cf.quote
+  if (q) {
+    els.push(heading('Condições'))
+    if (q.prazoExecucao) els.push(kv('Prazo de execução', q.prazoExecucao))
+    if (q.validade) els.push(kv('Validade do orçamento', q.validade))
+    if (q.condicoesPagamento) els.push(kv('Condições de pagamento', q.condicoesPagamento))
+    if (q.exclusoes.length > 0) {
+      els.push({ t: 'text', text: 'Exclusões:', size: 10, bold: true, color: C.n700, gapBefore: 8 })
+      for (const e of q.exclusoes) els.push({ t: 'bullet', text: e, size: 10, color: C.n700, dot: C.n400 })
     }
-    pushDisclosures(els, cf)
-    return render(els)
+    if (q.body) {
+      els.push(heading('Mensagem'))
+      els.push({ t: 'text', text: q.body, size: 10, color: C.n700, gapBefore: 4 })
+    }
   }
 
-  // Premium with tags.
-  els.push(heading('Indicative quote'))
-  const premiumRow: Seg[] = [
-    { kind: 'text', text: formatCurrency(cf.quote.premium, cf.quote.currency), size: 22, bold: true, color: C.ink },
-    { kind: 'badge', text: 'SIMULATED RATING', size: 9, bg: C.amberBg, color: C.amberFg },
-  ]
-  if (cf.quote.reliable === false) {
-    premiumRow.push({ kind: 'badge', text: 'INSUFFICIENT DATA - PLACEHOLDER', size: 9, bg: C.roseBg, color: C.roseFg })
-  }
-  els.push({ t: 'row', segs: premiumRow, gapBefore: 4 })
-
-  if (cf.quote.reliable === false && cf.quote.assumptions?.length) {
-    els.push({
-      t: 'panel',
-      bg: C.roseBgSoft,
-      gapBefore: 6,
-      lines: cf.quote.assumptions.map((a) => ({ text: a, size: 9.5, color: C.roseFg, dot: C.roseFg })),
-    })
-  }
-  if (cf.quote.summary) els.push({ t: 'text', text: cf.quote.summary, size: 10, color: C.n700, gapBefore: 8 })
-
-  els.push(heading('Rating breakdown'))
-  cf.quote.ratingBreakdown.forEach((b, i) =>
-    els.push(kv(b.label, b.kind === 'modifier' ? `x${b.value}` : formatCurrency(b.value), i > 0)),
-  )
-
-  if (cf.appetite) {
-    const dc = decisionColors(cf.appetite.decision)
-    els.push(heading('Appetite & risk'))
-    els.push({
-      t: 'row',
-      segs: [
-        { kind: 'badge', text: dc.label, size: 9, bg: dc.bg, color: dc.fg },
-        { kind: 'text', text: `score ${cf.appetite.score.toFixed(2)}`, size: 10, color: C.n500 },
-      ],
-    })
-    for (const r of cf.appetite.reasons) els.push({ t: 'bullet', text: r, size: 10, color: C.n700, dot: C.n400 })
-  }
-
-  if (cf.quote.preBindChecklist.length > 0) {
-    els.push(heading('Pre-bind checklist'))
-    for (const c of cf.quote.preBindChecklist) els.push({ t: 'check', text: c.item, size: 10, color: C.n700 })
-  }
-
-  pushDisclosures(els, cf)
-  return render(els)
-}
-
-function pushDisclosures(els: El[], cf: CaseFile): void {
-  if (cf.audit) {
-    const flag = cf.audit.compliance === 'pass'
-    const bg = flag ? C.greenBg : C.amberBg
-    const fg = flag ? C.greenFg : C.amberFg
-    els.push(heading('Compliance & audit'))
-    els.push({ t: 'row', segs: [{ kind: 'badge', text: cf.audit.compliance.toUpperCase(), size: 9, bg, color: fg }] })
-    if (cf.audit.summary) els.push({ t: 'text', text: cf.audit.summary, size: 10, color: C.n700, gapBefore: 4 })
-    for (const f of cf.audit.flags) els.push({ t: 'bullet', text: f, size: 10, color: C.roseFg, dot: C.roseFg })
-  }
-  els.push(heading('Important notice'))
+  els.push(heading('Nota'))
   els.push({
     t: 'text',
-    text: 'This quotation was produced by an automated underwriting assistant for demonstration. The premium is generated by a SIMULATED rating engine and is non-binding. No coverage is in force unless and until a policy is issued by the carrier. Figures are subject to underwriting review and verification of the submission.',
+    text: 'Orçamento gerado com o assistente Miraside. Os preços resultam do catálogo da empresa e são válidos pelo período indicado.',
     size: 9,
     color: C.n500,
   })
+
+  return render(els)
 }

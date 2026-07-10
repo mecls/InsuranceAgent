@@ -5,9 +5,8 @@ import { buildQuotePdf, quoteFilename } from '@/lib/quote/quote-pdf'
 export const runtime = 'nodejs'
 
 /**
- * Download the finished quotation as a PDF. Built deterministically from the
- * run's Case File (premium, breakdown, appetite, subjectivities, disclosures),
- * carrying the SIMULATED / reliability caveats through to print.
+ * Download the carta de adjudicação (plus a comparison summary) as a PDF, built
+ * deterministically from the run's Case File.
  */
 export async function GET(
   _req: NextRequest,

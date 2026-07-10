@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid'
 import { supabaseService } from '@/lib/supabase/service'
-import type { CaseFile } from '@/lib/underwriting/case-file'
+import type { CaseFile } from '@/lib/procurement/case-file'
 
 export type RunStatus =
   | 'pending'
@@ -14,11 +14,10 @@ export interface RunRow {
   slug: string
   status: RunStatus
   submission_label: string
-  /** The scenario the synthetic packet came from (clean | referral | gappy | upload). */
+  /** The scenario id for a demo run (obra | escritorio | seguro | …), or the
+   *  entry channel for a live run (web | gmail | slack). */
   scenario: string
   case_file: CaseFile | null
-  /** A demo policy record written when the underwriter binds. */
-  bound_policy: { policyNumber: string; boundAt: string } | null
   error_message: string | null
   created_at: string
   ready_at: string | null
@@ -77,6 +76,23 @@ export async function listRuns(limit = 30): Promise<RunRow[]> {
   return (data as RunRow[] | null) ?? []
 }
 
+/**
+ * Find the most recent in-flight run whose customer contact matches (phone or
+ * email) — used to route an inbound WhatsApp/email reply back to its case.
+ */
+export async function findOpenRunByCustomerContact(contact: string): Promise<RunRow | null> {
+  const { data, error } = await supabaseService()
+    .from('runs')
+    .select('*')
+    .in('status', ['running', 'awaiting_human'])
+    .eq('case_file->customer->>contact', contact)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(`findOpenRunByCustomerContact failed: ${error.message}`)
+  return (data as RunRow | null) ?? null
+}
+
 export async function setRunStatus(
   id: string,
   status: RunStatus,
@@ -123,27 +139,24 @@ export async function markRunFailed(id: string, message: string): Promise<void> 
   if (error) throw new Error(`markRunFailed failed: ${error.message}`)
 }
 
+export type HumanActionType =
+  | 'send_rfq'
+  | 'chase'
+  | 'proceed'
+  | 'adjudicate'
+  | 'reject_quote'
+  | 'skip_supplier'
+  | 'override_field'
+
 export async function recordHumanAction(
   runId: string,
-  type: 'approve_send' | 'reject_send' | 'bind' | 'override_field',
+  type: HumanActionType,
   payload: Record<string, unknown>,
 ): Promise<void> {
   const { error } = await supabaseService()
     .from('human_actions')
     .insert({ run_id: runId, type, payload })
   if (error) throw new Error(`recordHumanAction failed: ${error.message}`)
-}
-
-export async function bindPolicy(id: string): Promise<string> {
-  const policyNumber = `GL-${new Date().getFullYear()}-${nanoid(6).toUpperCase()}`
-  const { error } = await supabaseService()
-    .from('runs')
-    .update({
-      bound_policy: { policyNumber, boundAt: new Date().toISOString() },
-    })
-    .eq('id', id)
-  if (error) throw new Error(`bindPolicy failed: ${error.message}`)
-  return policyNumber
 }
 
 // ── Storage (submission attachments) ────────────────────────────────────────
